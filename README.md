@@ -1,7 +1,7 @@
 # NIO（Non-blocking IO）
 ## ByteBuffer
 
-> Buffer是非线程安全的
+> `Buffer`是非线程安全的
 
 相关代码见：<u>cn.thomas.netty.chapter01.ByteBufferTest</u>
 
@@ -149,3 +149,205 @@
 6. **compact 方法，是把未读完的部分向前压缩，然后切换至写模式**
 
    ![image-20230411094807941](README.assets/image-20230411094807941.png)
+
+
+
+## 文件编程
+
+相关代码见：<u>cn.thomas.netty.chapter01.FileChannelTest</u>
+
+### FileChannel
+
+> `FileChannel`只能在阻塞模式下工作
+
+#### 常用方法
+
+1. **获取：**
+
+   不能直接打开`FileChannel`，必须通过`FileInputStream`、`FileOutputStream`或者`RandomAccessFile`来获取`FileChannel`，它们都提供了`getChannel()`方法
+
+   * 通过`FileInputStream.getChannel()`获取的`channel`只能读
+   * 通过`FileOutputStream.getChannel()`获取的`channel`只能写
+   * 通过`RandomAccessFile.getChannel()`是否能读写根据构造`RandomAccessFile`是的读写模式决定
+
+2. **读取：**
+
+   会从`channel`读取数据填充`ByteBuffer`，返回值标识督导了多少字节，-1标识到达了文件末尾
+
+   ```java
+   int readBytes = channel.read(buffer);
+   ```
+
+3. **写入：**
+
+   在`while`循环中调用`channel.write()`是因为`write()`方法并不能保证一次将`buffer`中的内容全部写入到`channel`
+
+   ```java
+   while(buffer.hasRemainging()) {
+       channel.write(buffer);
+   }
+   ```
+
+4. **关闭：**
+
+   `channel`必须关闭，不过调用了`FileInputStream`、`FileOutputStream`或者`RandomAccessFile`的`close()`方法会间接调用`channel.close()`方法
+
+5. **位置：**
+
+   获取当前位置
+
+   ```java
+   long pos = channel.position();
+   ```
+
+   设置当前位置
+
+   ```java
+   long newPos = ...;
+   channel.position(newPos);
+   ```
+
+   设置当前位置时，如果设置为文件的末尾
+
+   * 这时读取会返回 -1 
+   * 这时写入，会追加内容，但要注意如果 position 超过了文件末尾，再写入时在新内容和原末尾之间会有空洞（00）
+
+6. **大小：**
+
+   使用`channel.size()`方法获取文件的大小
+
+7. **强制写入：**
+
+   操作系统处于性能的考虑，会将数据缓存，不是立刻写入磁盘。可以调用`channel.force(true)`方法将文件内容和元数据（文件的权限信息等）立刻写入磁盘
+
+8. **transformTo()**&**transformFrom()：<u>FileChannelTest.test_transform()</u>**
+
+   底层使用零拷贝，效率高
+
+   * `transformFrom()`：目标端调用，从源端拉取数据
+   * `transformTo()`：源端调用，向目标端传输数据
+
+   ```java
+   String from = "src/test/resources/data.txt";
+   String to = "src/test/resources/data_transform.txt";
+   
+   try (FileChannel fromChannel = new FileInputStream(from).getChannel();
+        FileChannel toChannel = new FileOutputStream(to).getChannel()) {
+       long size = fromChannel.size();
+       for (long left = size; left > 0; ) {
+           log.debug("position: {}, left: {}", size - left, left);
+           // 每次最多只能传输2G内容
+           left -= fromChannel.transferTo(size - left, (left), toChannel);
+       }
+   } catch (IOException e) {
+       e.printStackTrace();
+   }
+   ```
+
+### Path&Paths
+
+> JDK 1.7引入了`Path`和`Paths`类，`Path`用来表示文件路径，`Paths`是工具类，用来获取`Path`实例
+
+<u>**FileChannelTest#test_path**</u>
+
+```java
+Path path = Paths.get("src/test/resources/data.txt");
+System.out.println(path);
+
+Path resources = Paths.get("src/test", "resources");
+System.out.println(resources);
+```
+
+### Files
+
+> JDK 1.7引入了`Files`工具类，提供一些对文件的操作方法
+
+#### 常用方法
+
+**<u>FileChannelTest#test_file()</u>**
+
+1. **检查文件是否存在：**
+
+   ```java
+   Path path = Paths.get("src/test/resources/data.txt");
+   Files.exists(path)
+   ```
+
+2. **创建一级目录：**
+
+   ```java
+   path = Paths.get("src/test/resources/dir");
+   Files.createDirectory(path);
+   ```
+
+3. **创建多级目录：**
+
+   ```java
+   path = Paths.get("src/test/resources/dir/d1/d2");
+   Files.createDirectories(path);
+   ```
+
+4. **拷贝文件：**
+
+   ```java
+   Path source = Paths.get("src/test/resources/data.txt");
+   Path target = Paths.get("src/test/resources/data_copy.txt");
+   Files.copy(source, target);
+   ```
+
+5. **移动文件：**
+
+   ```java
+   source = Paths.get("src/test/resources/data_copy.txt");
+   target = Paths.get("src/test/resources/data_move.txt");
+   Files.move(source, target);
+   ```
+
+6. **删除文件：**
+
+   ```java
+   Path deletePath = Paths.get("src/test/resources/data_move.txt");
+   Files.delete(deletePath);
+   ```
+
+7. **删除目录：**
+
+   ```java
+   Path deleteDir = Paths.get("src/test/resources/dir/d1/d2");
+   Files.delete(deleteDir);
+   ```
+
+8. **遍历目录：<u>FileChannelTest#test_fileWalk()</u>**
+
+   提供了`walkFileTree()`方法，使用访问者模式，对目录进行遍历，在使用时实现`SimpleFileVisitor`类中的相应方法，完成对目录的遍历：
+
+   ```java
+   String javaHome = System.getenv("JAVA_HOME");
+   Path path = Paths.get(javaHome);
+   AtomicInteger dirCount = new AtomicInteger();
+   AtomicInteger fileCount = new AtomicInteger();
+   AtomicInteger jarCount = new AtomicInteger();
+   Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+       @Override
+       public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+           log.debug("访问目录：{}", dir);
+           dirCount.getAndIncrement();
+           return super.preVisitDirectory(dir, attrs);
+       }
+   
+       @Override
+       public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+           log.debug("访问文件：{}", file);
+           if (file.getFileName().toString().endsWith(".jar")) {
+               jarCount.getAndIncrement();
+           }
+           fileCount.getAndIncrement();
+           return super.visitFile(file, attrs);
+       }
+   });
+   log.info("目录总数：{}", dirCount);
+   log.info("文件总数：{}", fileCount);
+   log.info("jar总数：{}", jarCount);
+   ```
+
+   

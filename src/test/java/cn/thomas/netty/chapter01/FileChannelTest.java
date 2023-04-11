@@ -61,7 +61,7 @@ public class FileChannelTest {
     }
 
     /**
-     * JDK 1.8引入了Files类，提供便捷的文件操作
+     * JDK 1.7引入了Files类，提供便捷的文件操作
      *
      * @throws IOException
      */
