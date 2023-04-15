@@ -350,4 +350,179 @@ System.out.println(resources);
    log.info("jar总数：{}", jarCount);
    ```
 
-   
+
+## 网络编程
+
+### 阻塞IO
+
+### 非阻塞IO
+
+### 多路复用
+
+#### Selector
+
+* **创建：**
+
+  ```java
+  Selector selector = Selector.open();
+  ```
+
+* **绑定Channel事件：**
+
+  也称为注册事件，绑定的事件`selector`才会关心
+
+  ```java
+  channel.configureBlocking(false);
+  SelectionKey key = channel.register(selector, 绑定事件);
+  ```
+
+  * `channel`必须处于非阻塞模式
+  * `FileChannel`没有非阻塞模式，因此不能配合`selector`一起使用
+  * 绑定的事件类型有：
+    * `OP_ACCEPT`：服务器端成功接受连接时触发
+    * `OP_CONNECT`：客户端连接成功时触发
+    * `OP_READ`：数据可读入时触发，有因为接收能力弱，数据暂不能读入的情况
+    * `OP_WRITE`：数据可写出时触发，有因为发送能力弱，数据暂不能写出的情况
+
+* **监听Channel事件：**
+
+  可通过以下三种方式来监听是否有事件发生，返回的方法值代表有多少`channel`发生了事件：
+
+  方法1：阻塞直到绑定事件发生
+
+  ```java
+  int count = selector.select();
+  ```
+
+  方法2：阻塞直到绑定事件发生，或者超时（单位ms）
+
+  ```java
+  int count = selector.select(long timeout);
+  ```
+
+  方法3：不会阻塞，也就是不管有没有事件，立刻返回，自己根据返回值检查是否有事件
+
+  ```java
+  int count = selector.selectNow();
+  ```
+
+#### 处理accept事件
+
+**<u>cn.thomas.netty.chapter01.Code04_SelectorTest#test_serverWithSelector()</u>**
+
+> 事件发生后，要么处理，要么取消（`cancel`），不能什么都不做，否则下次该事件仍会触发
+
+```java
+if (selectionKey.isAcceptable()) {
+    ServerSocketChannel ssc = (ServerSocketChannel) selectionKey.channel();
+    SocketChannel socketChannel = ssc.accept();
+    socketChannel.configureBlocking(false);
+    log.debug("获取到客户端连接：{}", socketChannel);
+    // 注册到选择器上，监听读事件，并绑定一个ByteBuffer作为附件
+    SelectionKey key = socketChannel.register(selector, SelectionKey.OP_READ, ByteBuffer.allocate(4));
+    key.interestOps(SelectionKey.OP_READ);
+}
+```
+
+#### 处理read事件
+
+**<u>cn.thomas.netty.chapter01.Code04_SelectorTest#test_serverWithSelector()</u>**
+
+* `socketChannel.read()`在当客户端强制断开连接时会抛出异常，为避免服务器因异常退出，需要对异常进行捕获，处理相关逻辑
+* 在当客户端正常退出时，服务器会通过`socketChannel.read()`接收到长度为-1的读事件，需要对相关逻辑进行处理
+
+```java
+if (selectionKey.isReadable()) {
+    SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
+    // 获取到绑定的附件ByteBuffer
+    ByteBuffer byteBuffer = (ByteBuffer) selectionKey.attachment();
+    try {
+        // 客户端强制断开连接后，继续读取会发生异常，进行捕获，处理客户端强制退出逻辑
+        int read = socketChannel.read(byteBuffer);
+        // 客户端正常退出后，会发送长度为-1的度时间，在此处处理断开连接的逻辑
+        if (-1 == read) {
+            log.debug("客户端：{} 断开连接", socketChannel);
+            // 客户端断开连接，忽略本次读事件
+            selectionKey.cancel();
+        }
+        // 读取客户端发送的消息
+        else {
+            spilt(byteBuffer);
+            // ByteBuffer进行扩容
+            if (byteBuffer.position() == byteBuffer.limit()) {
+                ByteBuffer newByteBuffer = ByteBuffer.allocate(byteBuffer.capacity() * 2);
+                byteBuffer.flip();
+                newByteBuffer.put(byteBuffer);
+                selectionKey.attach(newByteBuffer);
+            }
+        }
+    } catch (IOException e) {
+        log.warn("读取客户端：{} 数据失败：", socketChannel, e);
+        selectionKey.cancel();
+    }
+}
+```
+
+```java
+private void spilt(ByteBuffer source) {
+    source.flip();
+    for (int i = 0; i < source.limit(); i++) {
+        char c = (char) source.get(i);
+        if ('\n' == c) {
+            int length = i + 1 - source.position();
+            ByteBuffer target = ByteBuffer.allocate(length);
+            for (int j = 0; j < length; j++) {
+                target.put(source.get());
+            }
+            target.flip();
+            ByteBufferUtil.debugAll(target);
+        }
+    }
+    source.compact();
+}
+```
+
+#### 处理write事件
+
+**<u>cn.thomas.netty.chapter01.Code05_WriteTest#test_writeServer()</u>**
+
+> 只要向 channel 发送数据时，socket 缓冲可写，这个事件会频繁触发，因此应当只在 socket 缓冲区写不下时再关注可写事件，数据写完之后再取消关注
+
+```java
+if (selectionKey.isAcceptable()) {
+    SocketChannel socketChannel = serverSocketChannel.accept();
+    socketChannel.configureBlocking(false);
+    SelectionKey socketChannelSelectKey = socketChannel.register(selector, 0);
+    socketChannelSelectKey.interestOps(SelectionKey.OP_READ);
+
+    // 向客户端发送消息
+    StringBuilder stringBuilder = new StringBuilder();
+    for (int i = 0; i < 3000000; i++) {
+        stringBuilder.append("a");
+    }
+    ByteBuffer byteBuffer = StandardCharsets.UTF_8.encode(stringBuilder.toString());
+    // 向客户端发送消息，消息长度 【三百万】 字节
+    int write = socketChannel.write(byteBuffer);
+    log.info("实际写入字节数：{}", write);
+    // 如果还有剩余字节数
+    if (byteBuffer.hasRemaining()) {
+        // 将客户端channel关注事件添加读事件，并将剩余的字节数组添加到附件中
+        socketChannelSelectKey.interestOps(socketChannelSelectKey.interestOps() | SelectionKey.OP_WRITE);
+        socketChannelSelectKey.attach(byteBuffer);
+    }
+}
+// 处理写事件
+if (selectionKey.isWritable()) {
+    ByteBuffer byteBuffer = (ByteBuffer) selectionKey.attachment();
+    SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
+    int write = socketChannel.write(byteBuffer);
+    log.info("实际写入字节数：{}", write);
+    // 如果不再剩余字节
+    if (!byteBuffer.hasRemaining()) {
+        // 将客户端channel关注的事件去掉读事件，并清空附件
+        selectionKey.interestOps(selectionKey.interestOps() ^ SelectionKey.OP_WRITE);
+        selectionKey.attach(null);
+    }
+}
+```
+
