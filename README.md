@@ -3,7 +3,7 @@
 
 > `Buffer`是非线程安全的
 
-相关代码见：<u>cn.thomas.netty.chapter01.ByteBufferTest</u>
+相关代码见：<u>cn.thomas.netty.chapter01.Code01_ByteBufferTest</u>
 
 ### 常用方法
 
@@ -154,7 +154,7 @@
 
 ## 文件编程
 
-相关代码见：<u>cn.thomas.netty.chapter01.FileTest</u>
+相关代码见：<u>cn.thomas.netty.chapter01.Code02_FileTest</u>
 
 ### FileChannel
 

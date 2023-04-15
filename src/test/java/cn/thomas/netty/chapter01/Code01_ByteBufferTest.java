@@ -20,7 +20,7 @@ import static cn.thomas.util.ByteBufferUtil.debugAll;
  * @create: 2023-04-09 09:40
  **/
 @Slf4j
-public class ByteBufferTest {
+public class Code01_ByteBufferTest {
 
     @Test
     public void test_byteBuffer() {
