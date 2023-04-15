@@ -154,7 +154,7 @@
 
 ## 文件编程
 
-相关代码见：<u>cn.thomas.netty.chapter01.FileChannelTest</u>
+相关代码见：<u>cn.thomas.netty.chapter01.FileTest</u>
 
 ### FileChannel
 

@@ -18,10 +18,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * @author 任康芃
  * @date 2023/4/10 9:58
- * @description: FileChannel测试类
+ * @description: 文件测试类
  */
 @Slf4j
-public class FileChannelTest {
+public class FileTest {
 
     /**
      * 测试transform，底层使用零拷贝，效率较高
