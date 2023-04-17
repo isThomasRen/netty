@@ -355,7 +355,96 @@ System.out.println(resources);
 
 ### 阻塞IO
 
+**<u>cn.thomas.netty.chapter01.Code03_NIOTest#test_blockingNIOServer()</u>**
+
+**服务器端：**
+
+1. 开启`serverSocketChannel`管道
+2. 对`serverSocketChannel`绑定监听端口
+3. `serverSocketChannel`阻塞式等待连接
+4. 从建立好的`socketChannel`阻塞式读取通道中数据
+
+```java
+ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+
+ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+serverSocketChannel.bind(new InetSocketAddress(8080));
+
+List<SocketChannel> socketChannels = new ArrayList<>();
+while (true) {
+    log.debug("serverSocketChannel等待连接...");
+    SocketChannel socketChannel = serverSocketChannel.accept();
+    log.debug("serverSocketChannel连接成功：{}", socketChannel);
+    socketChannels.add(socketChannel);
+    for (SocketChannel channel : socketChannels) {
+        log.debug("准备读取socketChannel: {} 中内容", channel);
+        channel.read(byteBuffer);
+        log.debug("读取socketChannel: {} 中内容完成", channel);
+        byteBuffer.flip();
+        ByteBufferUtil.debugRead(byteBuffer);
+        byteBuffer.clear();
+    }
+}
+```
+
+**客户端：**
+
+1. 开启`SocketChannel`管道
+2. 对`SocketChannel`绑定连接的服务器地址及端口号
+
+```java
+SocketChannel socketChannel = SocketChannel.open();
+socketChannel.connect(new InetSocketAddress("localhost", 8080));
+System.out.println("debug...");
+```
+
+**阻塞模式存在的问题：**
+
+`serverSocketChannel.accept()`方法和`socketChannel.read()`方法均会导致线程阻塞，无法同时处理多个客户端的连接通信，并且效率较低
+
 ### 非阻塞IO
+
+1. 开启`serverSocketChannel`管道
+2. 对`serverSocketChannel`绑定监听端口
+3. 将`serverSocketChannel`设置为非阻塞模式
+4. `serverSocketChannel`阻塞式等待连接
+5. 将`socketChannel`设置为非阻塞模式
+6. 从建立好的`socketChannel`阻塞式读取通道中数据
+
+**<u>cn.thomas.netty.chapter01.Code03_NIOTest#test_nonblockingNioServer()</u>**
+
+**服务器端：**
+
+```java
+ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+
+ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+serverSocketChannel.bind(new InetSocketAddress(8080));
+serverSocketChannel.configureBlocking(false);
+
+List<SocketChannel> socketChannels = new ArrayList<>();
+while (true) {
+    SocketChannel socketChannel = serverSocketChannel.accept();
+    if (null != socketChannel) {
+        socketChannel.configureBlocking(false);
+        log.debug("客户端连接完成：{}", socketChannel);
+        socketChannels.add(socketChannel);
+    }
+    for (SocketChannel channel : socketChannels) {
+        int read = channel.read(byteBuffer);
+        if (read > 0) {
+            log.debug("读取客户端 {} 完成", channel);
+            byteBuffer.flip();
+            ByteBufferUtil.debugRead(byteBuffer);
+            byteBuffer.clear();
+        }
+    }
+}
+```
+
+**非阻塞模式存在的问题：**
+
+解决了阻塞式IO中服务器端一个线程只能同时处理一个客户端的读写请求的问题，但无论是否存在连接、读写时间的发生，循环一直处于运行状态，消耗CPU资源
 
 ### 多路复用
 
@@ -522,6 +611,154 @@ if (selectionKey.isWritable()) {
         // 将客户端channel关注的事件去掉读事件，并清空附件
         selectionKey.interestOps(selectionKey.interestOps() ^ SelectionKey.OP_WRITE);
         selectionKey.attach(null);
+    }
+}
+```
+
+### 多线程优化
+
+**<u>cn.thomas.netty.chapter01.Code06_MultiThreadTest</u>**
+
+**服务器端：**
+
+```java
+@Slf4j
+static class BossEventLoop implements Runnable {
+
+    private Selector boss;
+    private WorkerEventLoop[] workerEventLoops;
+    private volatile boolean start = false;
+    private final AtomicInteger index = new AtomicInteger();
+
+    public void register() throws IOException {
+        if (!start) {
+            ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
+            serverSocketChannel.bind(new InetSocketAddress(8080));
+            serverSocketChannel.configureBlocking(false);
+
+            boss = Selector.open();
+            serverSocketChannel.register(boss, SelectionKey.OP_ACCEPT);
+
+            workerEventLoops = initWorkerEventLoops();
+
+            log.debug("boss线程启动...");
+            new Thread(this, "boss").start();
+            start = true;
+        }
+    }
+
+    private WorkerEventLoop[] initWorkerEventLoops() {
+        workerEventLoops = new WorkerEventLoop[Runtime.getRuntime().availableProcessors()];
+        for (int i = 0; i < workerEventLoops.length; i++) {
+            WorkerEventLoop workerEventLoop = new WorkerEventLoop("worker-" + i);
+            workerEventLoops[i] = workerEventLoop;
+        }
+        return workerEventLoops;
+    }
+
+    @Override
+    public void run() {
+        while (true) {
+            try {
+                boss.select();
+                Set<SelectionKey> selectionKeys = boss.selectedKeys();
+                Iterator<SelectionKey> selectionKeyIterator = selectionKeys.iterator();
+                while (selectionKeyIterator.hasNext()) {
+                    SelectionKey selectionKey = selectionKeyIterator.next();
+                    selectionKeyIterator.remove();
+                    if (selectionKey.isAcceptable()) {
+                        ServerSocketChannel channel = (ServerSocketChannel) selectionKey.channel();
+                        SocketChannel socketChannel = channel.accept();
+                        socketChannel.configureBlocking(false);
+                        log.debug("接收到客户端连接：{}", socketChannel);
+                        // 负载均衡 - 轮询
+                        workerEventLoops[index.getAndIncrement() % workerEventLoops.length].register(socketChannel);
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+```
+
+```java
+@Slf4j
+static class WorkerEventLoop implements Runnable {
+
+    private final String name;
+    private Selector worker;
+    private volatile boolean start = false;
+
+    private ConcurrentLinkedDeque<Runnable> tasks = new ConcurrentLinkedDeque<>();
+
+    public WorkerEventLoop(String name) {
+        this.name = name;
+    }
+
+    public void register(SocketChannel socketChannel) throws IOException {
+        if (!start) {
+            worker = Selector.open();
+            new Thread(this, name).start();
+            start = true;
+        }
+        // 向队列条件任务，并没有立刻执行
+        tasks.add(() -> {
+            try {
+                socketChannel.register(worker, SelectionKey.OP_READ, ByteBuffer.allocate(4));
+            } catch (ClosedChannelException e) {
+                e.printStackTrace();
+            }
+        });
+        // 唤醒selector
+        worker.wakeup();
+    }
+
+    @Override
+    public void run() {
+        log.debug("worker线程启动...");
+        while (true) {
+            try {
+                worker.select();
+                Runnable task = tasks.poll();
+                if (null != task) {
+                    // 执行注册
+                    task.run();
+                }
+                Set<SelectionKey> selectionKeys = worker.selectedKeys();
+                Iterator<SelectionKey> selectionKeyIterator = selectionKeys.iterator();
+                while (selectionKeyIterator.hasNext()) {
+                    SelectionKey selectionKey = selectionKeyIterator.next();
+                    selectionKeyIterator.remove();
+                    if (selectionKey.isReadable()) {
+                        SocketChannel channel = (SocketChannel) selectionKey.channel();
+                        log.debug("接收到客户端 {} 发送的消息", channel);
+                        ByteBuffer byteBuffer = (ByteBuffer) selectionKey.attachment();
+                        try {
+                            int read = channel.read(byteBuffer);
+                            if (-1 == read) {
+                                selectionKey.cancel();
+                                channel.close();
+                            }
+                            resolveMessage(byteBuffer);
+                            if (byteBuffer.position() == byteBuffer.limit()) {
+                                ByteBuffer newByteBuffer = ByteBuffer.allocate(byteBuffer.capacity() * 2);
+                                byteBuffer.flip();
+                                newByteBuffer.put(byteBuffer);
+                                selectionKey.attach(newByteBuffer);
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                            selectionKey.cancel();
+                            channel.close();
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 }
 ```
