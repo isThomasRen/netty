@@ -1,4 +1,7 @@
+[toc]
+
 # NIO（Non-blocking IO）
+
 ## ByteBuffer
 
 > `Buffer`是非线程安全的
@@ -7,7 +10,7 @@
 
 ### 常用方法
 
-* **读写功能：<u>ByteBufferTest#test_byteBufferReadWrite()</u>**
+* **读写功能：<u>Code01_ByteBufferTest#test_byteBufferReadWrite()</u>**
 
   写入：
 
@@ -25,7 +28,7 @@
   buffer.get()
   ```
 
-* **模式切换：<u>ByteBufferTest#test_byteBufferReadWrite()</u>**
+* **模式切换：<u>Code01_ByteBufferTest#test_byteBufferReadWrite()</u>**
 
   `ByteBuffer`实例化后默认为写模式
 
@@ -38,7 +41,7 @@
   buffer.compact();	// 保留未读取的字节
   ```
 
-* **内存分配：<u>ByteBufferTest#test_allocate()</u>**
+* **内存分配：<u>Code01_ByteBufferTest#test_allocate()</u>**
 
   可分配堆内存，或分配直接内存
 
@@ -49,7 +52,7 @@
   ByteBuffer buffer = ByteBuffer.allocateDirect(16);
   ```
 
-* **读功能扩展：<u>ByteBufferTest#test_byteBufferReadExtend</u>**
+* **读功能扩展：<u>Code01_ByteBufferTest#test_byteBufferReadExtend</u>**
 
   `mark()`&`reset()`
 
@@ -69,7 +72,7 @@
   buffer.get(i);
   ```
 
-* **与字符串的转换：<u>ByteBufferTest#test_ByteBufferString()</u>**
+* **与字符串的转换：<u>Code01_ByteBufferTest#test_ByteBufferString()</u>**
 
   字符串 转化为 `ByteBuffer`：
 
@@ -98,7 +101,7 @@
 
 * **分散读取&集中写入：**
 
-  分散读取：**<u>ByteBufferTest#test_scatteringRead()</u>**
+  分散读取：**<u>Code01_ByteBufferTest#test_scatteringRead()</u>**
 
   ```java
   ByteBuffer buffer1 = ByteBuffer.allocate(3);
@@ -108,7 +111,7 @@
   channel.read(new ByteBuffer[]{buffer1, buffer2, buffer3});
   ```
 
-  集中写入：**<u>ByteBufferTest#test_gatheringWrite()</u>**
+  集中写入：**<u>Code01_ByteBufferTest#test_gatheringWrite()</u>**
 
   ```java
   ByteBuffer buffer1 = StandardCharsets.UTF_8.encode("hello");
@@ -248,7 +251,7 @@
 
 > JDK 1.7引入了`Path`和`Paths`类，`Path`用来表示文件路径，`Paths`是工具类，用来获取`Path`实例
 
-<u>**FileChannelTest#test_path**</u>
+<u>**cn.thomas.netty.chapter01.Code02_FileTest#test_path**</u>
 
 ```java
 Path path = Paths.get("src/test/resources/data.txt");
@@ -264,7 +267,7 @@ System.out.println(resources);
 
 #### 常用方法
 
-**<u>FileChannelTest#test_file()</u>**
+**<u>cn.thomas.netty.chapter01.Code02_FileTest#test_file()</u>**
 
 1. **检查文件是否存在：**
 
@@ -317,7 +320,7 @@ System.out.println(resources);
    Files.delete(deleteDir);
    ```
 
-8. **遍历目录：<u>FileChannelTest#test_fileWalk()</u>**
+8. **遍历目录：<u>cn.thomas.netty.chapter01.Code02_FileTest#test_fileWalk()</u>**
 
    提供了`walkFileTree()`方法，使用访问者模式，对目录进行遍历，在使用时实现`SimpleFileVisitor`类中的相应方法，完成对目录的遍历：
 
@@ -763,3 +766,127 @@ static class WorkerEventLoop implements Runnable {
 }
 ```
 
+## IO模型
+
+**Stream VS Channel：**
+
+* `Stream`不会自动缓冲数据，`Channel`会利用系统提供的发送缓冲区、接受缓冲区（更为底层）
+* `Stream`仅支持阻塞API，`Channel`同时支持阻塞、非阻塞API，网络`Channel`可配合`Selector`实现多路复用
+* 二者均为全双工，即读写可同时进行
+
+> **同步阻塞**、**同步非阻塞**、**同步多路复用**、**异步非阻塞**
+>
+> * 同步：线程自己获取结果（一个线程）
+> * 异步：线程自己不去获取结果，而是由其他线程送结果（至少两个线程）
+
+当调用一次`channel.read()`或`stream.read()`后，会切换至操作系统内核态来完成真正数据读取，而读取又分为两个阶段：
+
+* 等待数据阶段
+
+* 复制数据阶段
+
+  ![image-20230419093830865](README.assets/image-20230419093830865.png)
+
+* **阻塞式IO：**
+
+  在*等待数据*、*复制数据*阶段均会阻塞
+
+* **非阻塞式IO：**
+
+  在*等待数据*阶段不会阻塞，在*复制数据*阶段会阻塞
+
+* **多路复用：**
+
+  在*等待数据*阶段不会阻塞，在*复制数据*阶段可以认为不会阻塞（只有当有读写事件发生时，才会进入复制数据阶段）
+
+* **异步IO：**
+
+  在*等待数据*阶段不会阻塞，在*复制数据*阶段不会阻塞（通过回调方法交给另一个线程处理）
+
+## 零拷贝
+
+### 传统 IO 问题
+
+传统的 IO 将一个文件通过 socket 写出
+
+```java
+File f = new File("file.txt");
+RandomAccessFile file = new RandomAccessFile(file, "r");
+
+byte[] buf = new byte[(int)f.length()];
+file.read(buf);
+
+Socket socket = ...;
+socket.getOutputStream().write(buf);
+```
+
+内部工作流程是这样的：
+
+![image-20230419095130110](README.assets/image-20230419095130110.png)
+
+1. Java本身并不具备IO读写能力，因此`read()`方法调用后，要从Java程序的**用户态**切换至**内核态**，去调用操作系统（Kernel）的读能力，将数据读入**内核缓冲区**。这期间用户线程阻塞，操作系统使用DMA（Direct Memory Access）来实现文件读，期间也不会使用CPU；
+2. 从**内核态**切换回用户态，将数据从**内核缓冲区**读入**用户缓冲区**（即`byte[] buf`），这期间CPU会参与拷贝，无法利用DMA；
+3. 调用`write()`方法，这是将数据从**用户缓冲区**（`byte[] buf`）写入**socket缓冲区**，CPU会参与拷贝；
+4. 接下来要向网卡写数据，这项能力Java又不具备，因此又得从**用户态**切换至**内核态**，调用操作系统的写能力，使用DMA将**socket缓冲区**的数据写入网卡，不会使用CPU。
+
+可以看到中间环节较多，Java的IO实际不是物理设备级别的读写，而是缓存的复制，底层的真正读写是操作系统完成的。
+
+* **用户态**与**内核态**的切换发生了3次，这个操作比较重量级
+* 数据拷贝了4次
+
+### NIO优化
+
+通过`DirectByteBuf`直接内存
+
+* `ByteBuffer.allcaote(10)`，获取到`HeapByteBuffer`对象，使用的仍然是堆内存
+
+* `ByteBuffer.allcateDirect(10)`，获取到`DirectByteBuffer`对象，使用的是直接内存
+
+  ![image-20230419100105318](README.assets/image-20230419100105318.png)
+
+大部分步骤与优化前相同，唯一一点：Java可以使用`DirectByteBuf`将堆外内存映射到JVM内存中来直接访问使用：
+
+* 这块内存不受JVM垃圾回收的影响，因此内存地址固定，有助于IO读写
+* Java中的`DirectByteBuf`对象仅维护了此内存的虚引用，内存回收分成两部
+  * `DirectByteBuf`对象被垃圾回收，将虚引用加入引用队列
+  * 通过专门线程访问引用队列，根据虚引用释放堆外内存
+* 减少了一次数据拷贝，**用户态**和**内核态**的切换次数没有减少
+
+<hr/>
+
+**进一步优化：**
+
+底层采用了`Linux 2.1`后提供的`sendFile`方法，Java中对应两个`channel`嗲用`transferTo()`/`transferFrom()`方法拷贝数据
+
+![image-20230419100615429](README.assets/image-20230419100615429.png)
+
+
+
+1. Java调用`transferTo()`方法后，要从Java程序的**用户态**切换至**内核态**，使用DMA将数据读入**内核缓冲区**，不会使用CPU；
+2. 数据从**内核缓冲区**传输到**socket缓冲区**，CPU会参与拷贝；
+3. 最后使用DMA将**socket缓冲区**的数据写入到网卡，不会使用CPU。
+
+可以看到：
+
+* 只发生了一次**用户态**和**内核态**的切换
+* 数据拷贝了3次
+
+<hr/>
+
+**进一步优化：**
+
+![image-20230419100915498](README.assets/image-20230419100915498.png)
+
+1. Java调用`transferTo()`方法后，要从Java程序的**用户态**切换至**内核态**，使用DMA将数据读入**内核缓冲区**，不会使用CPU；
+2. 只会将一些`offset`和`length`信息拷入**socket缓冲区**，几乎无消耗
+3. 使用DMA将**内核缓冲区**的数据写入网卡，不会使用CPU
+
+整个过程仅发生了一次**用户态**与**内核态**的切换，数据拷贝了2次，所谓的**零拷贝**，并不是真正无拷贝，二十不会拷贝重复数据到JVM内存中，零拷贝的优点有：
+
+* 更少的**用户态**与**内核态**的切换
+* 不利于CPU计算，减少CPU的缓存伪共享
+* 零拷贝适合小文件传输
+
+## AIO
+
+文件IO/网络IO代码参考：<u>**cn.thomas.netty.chapter01.Code07_AIOTest**</u>
