@@ -957,3 +957,116 @@ new Bootstrap()
     .writeAndFlush("hello netty!");
 ```
 
+## EventLoop
+
+### DefaultEventLoop
+
+可处理普通事件、定时事件，参考代码：**<u>cn.thomas.netty.chapter02.Code02_EventLoopTest#test_eventLoop()</u>**
+
+```java
+DefaultEventLoopGroup defaultEventLoopGroup = new DefaultEventLoopGroup(2);
+
+log.debug("next:{}", defaultEventLoopGroup.next());
+log.debug("next:{}", defaultEventLoopGroup.next());
+log.debug("next:{}", defaultEventLoopGroup.next());
+
+// 处理普通事件
+EventLoop eventLoop = defaultEventLoopGroup.next();
+eventLoop.submit(() -> log.debug("thread running..."));
+
+// 处理定时事件
+eventLoop.scheduleAtFixedRate(() -> log.debug("thread running"), 1, 1, TimeUnit.SECONDS);
+```
+
+### NioEventLoop
+
+具备`DefaultEventLoop`功能，同时可处理连接、读写网络事件，参考代码：**<u>cn.thomas.netty.chapter02.Code02_EventLoopTest#test_nioEventLoopServer()</u>**
+
+```java
+DefaultEventLoopGroup defaultEventLoopGroup = new DefaultEventLoopGroup(2);
+new ServerBootstrap()
+    // 绑定两个EventLoopGroup，第一个用于处理连接事件，第二个用于处理读写事件
+    .group(new NioEventLoopGroup(), new NioEventLoopGroup(2))
+    .channel(NioServerSocketChannel.class)
+    .childHandler(new ChannelInitializer<NioSocketChannel>() {
+        @Override
+        protected void initChannel(NioSocketChannel ch) throws Exception {
+            ch.pipeline()
+                // 绑定IO读写事件
+                .addLast(new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                        ByteBuf byteBuf = msg instanceof ByteBuf ? (ByteBuf) msg : null;
+                        if (null != byteBuf) {
+                            log.debug("接收到客户端[ {} ]发送的消息：{}", ch, byteBuf.toString(StandardCharsets.UTF_8));
+                        }
+                        // 如果后续仍有处理器，需要调用此方法唤醒后续处理器
+                        ctx.fireChannelRead(msg);
+                    }
+                })
+                // 耗时的操作可以绑定到默认EventLoopGroup，减轻NioEventLoopGroup的工作负担，提升IO吞吐量
+                .addLast(defaultEventLoopGroup, "defaultHandler", new ChannelInboundHandlerAdapter() {
+                    @Override
+                    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                        ByteBuf byteBuf = msg instanceof ByteBuf ? (ByteBuf) msg : null;
+                        if (null != byteBuf) {
+                            log.debug("DefaultEventLoopGroup 接收到客户端[ {} ]发送的消息：{}", ch, byteBuf.toString(StandardCharsets.UTF_8));
+                        }
+                    }
+                });
+        }
+    })
+    .bind(8080);
+```
+
+
+
+### 实现
+
+`EventLoopGroup`可理解为一个线程池，其中每一个线程对应一个`EventLoop`，若无指定参数，默认线程池大小为CPU核心数2倍。
+
+```java
+static {
+    DEFAULT_EVENT_LOOP_THREADS = Math.max(1, SystemPropertyUtil.getInt(
+        "io.netty.eventLoopThreads", NettyRuntime.availableProcessors() * 2));
+
+    if (logger.isDebugEnabled()) {
+        logger.debug("-Dio.netty.eventLoopThreads: {}", DEFAULT_EVENT_LOOP_THREADS);
+    }
+}
+
+protected MultithreadEventLoopGroup(int nThreads, Executor executor, Object... args) {
+    super(nThreads == 0 ? DEFAULT_EVENT_LOOP_THREADS : nThreads, executor, args);
+}
+```
+
+**handler切换**
+
+在`ChannelInboundHandlerAdapter`处理器绑定事件时，如果后续仍有Handler对相关消息进行操作，需要调用以下代码：
+
+```java
+// 如果后续仍有处理器，需要调用此方法唤醒后续处理器
+ctx.fireChannelRead(msg);
+```
+
+源码实现如下：
+
+```java
+static void invokeChannelRead(final AbstractChannelHandlerContext next, Object msg) {
+    final Object m = next.pipeline.touch(ObjectUtil.checkNotNull(msg, "msg"), next);
+    EventExecutor executor = next.executor();
+    if (executor.inEventLoop()) {
+        next.invokeChannelRead(m);
+    } else {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                next.invokeChannelRead(m);
+            }
+        });
+    }
+}
+```
+
+如果下一个处理器执行器位于当前的事件循环组中，直接在当前线程中执行下一个处理器相关逻辑，否则，在其处理器中新开一个线程，提交任务。
+
