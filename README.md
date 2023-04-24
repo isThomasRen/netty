@@ -1070,3 +1070,60 @@ static void invokeChannelRead(final AbstractChannelHandlerContext next, Object m
 
 如果下一个处理器执行器位于当前的事件循环组中，直接在当前线程中执行下一个处理器相关逻辑，否则，在其处理器中新开一个线程，提交任务。
 
+## Channel
+
+代码参考：**<u>cn.thomas.netty.chapter02.Code03_ChannelTest#test_nettyClient()</u>**
+
+### ChannelFuture
+
+* `sync()`方法同步等待`channel`建立连接
+* `addListener()`方法异步等待`channel`建立连接
+
+```java
+ChannelFuture channelFuture = new Bootstrap()
+    .group(group)
+    .channel(NioSocketChannel.class)
+    .handler(new ChannelInitializer<NioSocketChannel>() {
+        @Override
+        protected void initChannel(NioSocketChannel ch) throws Exception {
+            log.debug("client channel init...");
+            ch.pipeline().addLast(new LoggingHandler(LogLevel.DEBUG));
+        }
+    })
+    .connect("localhost", 8080);
+```
+
+同步方式：
+
+```java
+channelFuture.sync();
+```
+
+异步方式：
+
+```java
+channelFuture.addListener((ChannelFutureListener) future -> log.debug("channel对象：{}", future.channel()));
+```
+
+### CloseFuture
+
+关闭通道对象，同样有两种方式：
+
+* `sync()`方法同步等待`channel`关闭连接
+* `addListener()`方法异步等待`channel`关闭连接
+
+同步方式：
+
+```java
+closeFuture.sync();
+```
+
+异步方式：
+
+```java
+closeFuture.addListener((ChannelFutureListener) future -> {
+    log.debug("处理关闭之后的操作...");
+    group.shutdownGracefully();
+});
+```
+
