@@ -26,7 +26,7 @@ public class Code03_NIOTest {
      * @throws IOException
      */
     @Test
-        public void test_blockingNIOServer() throws IOException {
+    public void test_blockingNIOServer() throws IOException {
         ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
 
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
@@ -34,17 +34,21 @@ public class Code03_NIOTest {
 
         List<SocketChannel> socketChannels = new ArrayList<>();
         while (true) {
-            log.debug("serverSocketChannel等待连接...");
-            SocketChannel socketChannel = serverSocketChannel.accept();
-            log.debug("serverSocketChannel连接成功：{}", socketChannel);
-            socketChannels.add(socketChannel);
-            for (SocketChannel channel : socketChannels) {
-                log.debug("准备读取socketChannel: {} 中内容", channel);
-                channel.read(byteBuffer);
-                log.debug("读取socketChannel: {} 中内容完成", channel);
-                byteBuffer.flip();
-                ByteBufferUtil.debugRead(byteBuffer);
-                byteBuffer.clear();
+            try {
+                log.debug("serverSocketChannel等待连接...");
+                SocketChannel socketChannel = serverSocketChannel.accept();
+                log.debug("serverSocketChannel连接成功：{}", socketChannel);
+                socketChannels.add(socketChannel);
+                for (SocketChannel channel : socketChannels) {
+                    log.debug("准备读取socketChannel: {} 中内容", channel);
+                    channel.read(byteBuffer);
+                    log.debug("读取socketChannel: {} 中内容完成", channel);
+                    byteBuffer.flip();
+                    ByteBufferUtil.debugRead(byteBuffer);
+                    byteBuffer.clear();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
     }
@@ -60,24 +64,30 @@ public class Code03_NIOTest {
 
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
         serverSocketChannel.bind(new InetSocketAddress(8080));
+        // 设置为非阻塞模式
         serverSocketChannel.configureBlocking(false);
 
         List<SocketChannel> socketChannels = new ArrayList<>();
         while (true) {
-            SocketChannel socketChannel = serverSocketChannel.accept();
-            if (null != socketChannel) {
-                socketChannel.configureBlocking(false);
-                log.debug("客户端连接完成：{}", socketChannel);
-                socketChannels.add(socketChannel);
-            }
-            for (SocketChannel channel : socketChannels) {
-                int read = channel.read(byteBuffer);
-                if (read > 0) {
-                    log.debug("读取客户端 {} 完成", channel);
-                    byteBuffer.flip();
-                    ByteBufferUtil.debugRead(byteBuffer);
-                    byteBuffer.clear();
+            try {
+//                log.debug("serverSocketChannel等待连接...");
+                SocketChannel socketChannel = serverSocketChannel.accept();
+                if (null != socketChannel) {
+                    socketChannel.configureBlocking(false);
+                    log.debug("客户端连接完成：{}", socketChannel);
+                    socketChannels.add(socketChannel);
                 }
+                for (SocketChannel channel : socketChannels) {
+                    int read = channel.read(byteBuffer);
+                    if (read > 0) {
+                        log.debug("读取客户端 {} 完成", channel);
+                        byteBuffer.flip();
+                        ByteBufferUtil.debugRead(byteBuffer);
+                        byteBuffer.clear();
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
     }

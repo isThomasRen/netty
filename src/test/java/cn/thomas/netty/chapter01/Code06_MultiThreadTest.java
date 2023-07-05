@@ -128,7 +128,7 @@ public class Code06_MultiThreadTest {
                     e.printStackTrace();
                 }
             });
-            // 唤醒selector
+            // 唤醒selector，此时已经手动向队列中入队了一个任务，唤醒被select()阻塞的worker
             worker.wakeup();
         }
 
@@ -137,6 +137,7 @@ public class Code06_MultiThreadTest {
             log.debug("worker线程启动...");
             while (true) {
                 try {
+                    // 阻塞的，通常情况下，只有注册再selector上的channel有事件就绪时，select()才会从阻塞中被唤醒
                     worker.select();
                     Runnable task = tasks.poll();
                     if (null != task) {
@@ -148,6 +149,7 @@ public class Code06_MultiThreadTest {
                     while (selectionKeyIterator.hasNext()) {
                         SelectionKey selectionKey = selectionKeyIterator.next();
                         selectionKeyIterator.remove();
+                        // 处理可读事件
                         if (selectionKey.isReadable()) {
                             SocketChannel channel = (SocketChannel) selectionKey.channel();
                             log.debug("接收到客户端 {} 发送的消息", channel);

@@ -2,6 +2,8 @@
 
 # NIO（Non-blocking IO）
 
+**三大组件：Buffer（内存缓冲区）、Channel（双向的数据传输通道）、Selector**
+
 ## ByteBuffer
 
 > `Buffer`是非线程安全的
@@ -54,7 +56,11 @@
 
 * **读功能扩展：<u>Code01_ByteBufferTest#test_byteBufferReadExtend</u>**
 
+  `rewind()`：从头开始读，将**position**置为0
+
   `mark()`&`reset()`
+
+  > `mark`：做一个标记，记录**position**位置，`reset`：将**position**设置为**mark**位置
 
   ```java
   // 标记当前position位置
@@ -175,7 +181,7 @@
 
 2. **读取：**
 
-   会从`channel`读取数据填充`ByteBuffer`，返回值标识督导了多少字节，-1标识到达了文件末尾
+   会从`channel`读取数据填充`ByteBuffer`，返回值标识读到了多少字节，-1标识到达了文件末尾
 
    ```java
    int readBytes = channel.read(buffer);
@@ -498,11 +504,11 @@ while (true) {
   int count = selector.selectNow();
   ```
 
+> 事件发生后，要么处理，要么取消（`cancel`），不能什么都不做，否则下次该事件仍会触发
+
 #### 处理accept事件
 
 **<u>cn.thomas.netty.chapter01.Code04_SelectorTest#test_serverWithSelector()</u>**
-
-> 事件发生后，要么处理，要么取消（`cancel`），不能什么都不做，否则下次该事件仍会触发
 
 ```java
 if (selectionKey.isAcceptable()) {

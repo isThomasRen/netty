@@ -22,6 +22,9 @@ import static cn.thomas.util.ByteBufferUtil.debugAll;
 @Slf4j
 public class Code01_ByteBufferTest {
 
+    /**
+     * 功能演示：Hello World
+     */
     @Test
     public void test_byteBuffer() {
         try (FileChannel channel = new FileInputStream("src/test/resources/data.txt").getChannel()) {

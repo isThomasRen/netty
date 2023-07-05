@@ -76,7 +76,7 @@ public class Code05_WriteTest {
                     // 如果不再剩余字节
                     if (!byteBuffer.hasRemaining()) {
                         // 将客户端channel关注的事件去掉读事件，并清空附件
-                        selectionKey.interestOps(selectionKey.interestOps() ^ SelectionKey.OP_WRITE);
+                        selectionKey.interestOps(selectionKey.interestOps() - SelectionKey.OP_WRITE);
                         selectionKey.attach(null);
                     }
                 }
